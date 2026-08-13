@@ -1,0 +1,6 @@
+/bin/
+/.go/
+*.key
+*.pem
+!conformance/testdata/**
+adopt-work/

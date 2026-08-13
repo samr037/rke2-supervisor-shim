@@ -1,0 +1,76 @@
+{{- if .Values.rbac.create }}
+# Node passwords are Secrets in kube-system, named <node>.node-password.rke2 -
+# the same place and format a real rke2 server uses. patch/list additionally
+# support recording and scanning certificate expiry annotations.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "shim.name" . }}-node-passwords
+  namespace: kube-system
+  labels: {{- include "shim.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "patch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "shim.name" . }}-node-passwords
+  namespace: kube-system
+  labels: {{- include "shim.labels" . | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ include "shim.name" . }}-node-passwords}
+subjects:
+  - {kind: ServiceAccount, name: {{ include "shim.name" . }}, namespace: {{ include "shim.namespace" . }}}
+---
+# Nodes: discovering control-plane addresses for /v1-rke2/apiservers.
+# Events: CertificateExpirationWarning, as a real rke2 server emits.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "shim.name" . }}
+  labels: {{- include "shim.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "shim.name" . }}
+  labels: {{- include "shim.labels" . | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ include "shim.name" . }}}
+subjects:
+  - {kind: ServiceAccount, name: {{ include "shim.name" . }}, namespace: {{ include "shim.namespace" . }}}
+{{- end }}
+{{- if .Values.rbac.createRKE2ControllerBinding }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rke2-controller
+  labels: {{- include "shim.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["nodes/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: rke2-controller
+  labels: {{- include "shim.labels" . | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: rke2-controller}
+subjects:
+  - {apiGroup: rbac.authorization.k8s.io, kind: User, name: "system:rke2-controller"}
+{{- end }}

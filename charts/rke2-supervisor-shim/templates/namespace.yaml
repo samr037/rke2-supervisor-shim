@@ -1,0 +1,13 @@
+{{- if .Values.namespace.create }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ include "shim.namespace" . }}
+  labels:
+    {{- include "shim.labels" . | nindent 4 }}
+    # The shim runs hostNetwork, which PodSecurity "baseline" - enforced
+    # cluster-wide by Talos - forbids. This namespace must be exempt.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+{{- end }}

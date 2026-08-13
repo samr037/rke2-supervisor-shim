@@ -1,0 +1,175 @@
+# rke2-supervisor-shim on a Talos control-plane node.
+#
+# hostNetwork is mandatory, not a convenience: after bootstrap an rke2 agent
+# dials <apiserver-ip>:9345 for the tunnel, taking the address from
+# /v1-rke2/apiservers. The supervisor must therefore live on the control-plane
+# node's own address. Production workers then use a fully stock config:
+#     server: https://<control-plane-ip>:9345
+#     token:  <token>
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rke2-shim
+  labels:
+    # hostNetwork is forbidden by PodSecurity "baseline", which Talos enforces.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: rke2-shim
+  namespace: rke2-shim
+---
+# Node passwords are kept as Secrets in kube-system, named
+# <node>.node-password.rke2 - the same place and format a real rke2 server uses,
+# so they survive rescheduling and an operator can clear one with:
+#   kubectl -n kube-system delete secret <node>.node-password.rke2
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: rke2-shim-node-passwords
+  namespace: kube-system
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    # patch/list are for recording and scanning certificate expiry annotations
+    verbs: ["get", "create", "patch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: rke2-shim-node-passwords
+  namespace: kube-system
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: rke2-shim-node-passwords}
+subjects:
+  - {kind: ServiceAccount, name: rke2-shim, namespace: rke2-shim}
+---
+# Emitting CertificateExpirationWarning events against Node objects, the same
+# way a real rke2 server warns before node certificates expire.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rke2-shim-events
+rules:
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: rke2-shim-events
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: rke2-shim-events}
+subjects:
+  - {kind: ServiceAccount, name: rke2-shim, namespace: rke2-shim}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: rke2-controller
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["nodes/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+# An rke2 agent authenticates to the apiserver as CN=system:rke2-controller to
+# label its own node. A real rke2 server creates this binding; Talos has never
+# heard of the identity, so we must.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: rke2-controller
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: rke2-controller}
+subjects:
+  - {apiGroup: rbac.authorization.k8s.io, kind: User, name: "system:rke2-controller"}
+---
+# A DaemonSet, not a Deployment: rke2 assumes a supervisor is co-located with
+# EVERY apiserver. /v1-rke2/apiservers advertises all control-plane nodes and
+# agents dial each of them on :9345 for the tunnel, so every control-plane node
+# must run a shim. A single-replica Deployment works with one CP and silently
+# breaks the day a second is added.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: rke2-supervisor-shim
+  namespace: rke2-shim
+spec:
+  updateStrategy: {type: RollingUpdate}
+  selector:
+    matchLabels: {app: rke2-supervisor-shim}
+  template:
+    metadata:
+      labels: {app: rke2-supervisor-shim}
+    spec:
+      serviceAccountName: rke2-shim
+      # The image runs as nonroot (65532). Secret volumes are owned by root, so
+      # without an fsGroup the CA files are unreadable -> "permission denied".
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      # The EMPTY STRING is load-bearing, not sloppiness. Talos labels control
+      # planes with "", RKE2 labels them "true". Matching "" is the only thing
+      # keeping the shim off the RKE2 servers during coexistence - and on those
+      # nodes rke2-server already owns :9345, so a hostNetwork pod landing there
+      # crashloops. Do NOT "fix" this to an Exists-style affinity.
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - {key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}
+      containers:
+        - name: shim
+          image: ghcr.io/samr037/rke2-supervisor-shim:latest
+          args:
+            - --listen=:9345
+            # No --apiservers: control-plane nodes are discovered from the API
+            # and refreshed, so adding a CP needs no config change. Pass
+            # --apiservers=ip:6443,... to pin the list instead.
+            - --cluster-dns=10.96.0.10
+            - --cluster-domain=cluster.local
+            - --pod-cidr=10.244.0.0/16
+            - --service-cidr=10.96.0.0/12
+          env:
+            # SANs for the self-managed serving certificate come from here
+            - {name: NODE_IP,   valueFrom: {fieldRef: {fieldPath: status.hostIP}}}
+            - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
+            - {name: SHIM_TOKEN, valueFrom: {secretKeyRef: {name: rke2-shim-token, key: token}}}
+          ports:
+            - {name: supervisor, containerPort: 9345, protocol: TCP}
+            - {name: metrics,    containerPort: 9346, protocol: TCP}
+          volumeMounts:
+            - {name: pki,    mountPath: /pki,           readOnly: true}
+            - {name: cfg,    mountPath: /etc/rke2-shim, readOnly: true}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          readinessProbe:
+            httpGet: {path: /healthz, port: 9346}
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket: {port: 9345}
+            initialDelaySeconds: 20
+            periodSeconds: 20
+      volumes:
+        # cluster-ca.crt/.key only. The serving certificate is now minted from
+        # that CA at startup and rotated automatically, so no shim.crt/.key is
+        # required (supply --tls-cert/--tls-key to override).
+        # 0440 + fsGroup 65532: readable by the shim, not world-readable.
+        - {name: pki,   secret: {secretName: rke2-shim-pki, defaultMode: 0440}}
+        # agent-config.json: a /v1-rke2/config captured from a REAL rke2 server.
+        - {name: cfg,   configMap: {name: rke2-shim-agent-config}}

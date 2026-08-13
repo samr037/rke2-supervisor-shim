@@ -1,0 +1,24 @@
+rke2-supervisor-shim is installed on the control-plane nodes of {{ .Release.Namespace }}.
+
+Verify it is serving:
+
+  kubectl -n {{ include "shim.namespace" . }} get ds {{ include "shim.name" . }} -o wide
+  kubectl -n {{ include "shim.namespace" . }} logs ds/{{ include "shim.name" . }} | grep advertising
+
+Point a worker at it with an ORDINARY rke2 agent config - nothing bespoke:
+
+  # /etc/rancher/rke2/config.yaml
+  server: https://<control-plane-ip>:{{ .Values.supervisorPort }}
+  token: <the token in secret {{ .Values.token.existingSecret }}>
+
+{{ if not .Values.cluster.apiServers -}}
+Control-plane addresses are discovered automatically, so adding a control-plane
+node needs no change here - the DaemonSet will start a shim on it.
+{{- else -}}
+WARNING: cluster.apiServers is pinned to {{ join "," .Values.cluster.apiServers }}.
+Every address listed MUST run a shim, or agents will fail to open their tunnel.
+Prefer leaving it empty so control-plane nodes are discovered.
+{{- end }}
+
+:{{ .Values.metrics.port }}/metrics is UNAUTHENTICATED on the host network.
+Restrict it at the host firewall - see docs/network-security.md.

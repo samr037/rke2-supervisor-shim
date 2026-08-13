@@ -1,0 +1,104 @@
+stages: [test, build, conformance]
+
+variables:
+  IMAGE: $CI_REGISTRY_IMAGE
+
+# ---------------------------------------------------------------------------
+# Tier 1 - runs on every commit. No VM, no privileged runner.
+# Replays the contracts captured from real rke2 servers against our handlers.
+# ---------------------------------------------------------------------------
+test:
+  stage: test
+  image: golang:1.26
+  script:
+    - go vet ./...
+    - go test -race -v ./...
+  cache:
+    key: gomod
+    paths: [.go/pkg/mod]
+  variables:
+    GOPATH: $CI_PROJECT_DIR/.go
+
+# Multi-arch image (amd64 + arm64) pushed to the project registry.
+#
+# ko rather than buildx/kaniko:
+#   - buildx needs a privileged dind service, which the shared runner does not
+#     provide (the job hangs forever on `docker info`);
+#   - kaniko only produces a single architecture;
+#   - ko is daemonless and cross-compiles Go natively, so arm64 is built at full
+#     speed instead of under QEMU emulation.
+#
+# The Dockerfile is kept for local/offline builds; ko reproduces it (static
+# binary on distroless nonroot) without needing a Docker daemon.
+build:
+  stage: build
+  image: golang:1.26
+  variables:
+    KO_DOCKER_REPO: $CI_REGISTRY_IMAGE
+    GOFLAGS: -trimpath
+    GOPATH: $CI_PROJECT_DIR/.go
+  cache:
+    key: gomod
+    paths: [.go/pkg/mod]
+  before_script:
+    - go install github.com/google/ko@latest
+    - export PATH="$GOPATH/bin:$PATH"
+    - mkdir -p ~/.docker
+    - |
+      cat > ~/.docker/config.json <<EOF
+      {"auths":{"$CI_REGISTRY":{"auth":"$(printf '%s:%s' "$CI_REGISTRY_USER" "$CI_REGISTRY_PASSWORD" | base64 | tr -d '\n')"}}}
+      EOF
+  script:
+    - ko build ./cmd/shim
+        --platform=linux/amd64,linux/arm64
+        --bare
+        --tags="$CI_COMMIT_SHORT_SHA,latest"
+        --image-refs=image-refs.txt
+    - cat image-refs.txt
+  artifacts:
+    paths: [image-refs.txt]
+    expire_in: 30 days
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_COMMIT_TAG
+
+# ---------------------------------------------------------------------------
+# Tier 2 - drift detection against upstream RKE2.
+#
+# Needs a throwaway VM reachable over SSH (CONFORMANCE_SSH_TARGET) because it
+# installs a real rke2 server. Scheduled nightly so that a protocol change
+# shows up here, not in production. See docs/compatibility.md.
+# ---------------------------------------------------------------------------
+.conformance:
+  stage: conformance
+  image: debian:13
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq openssh-client python3 git >/dev/null
+    - mkdir -p ~/.ssh && echo "$CONFORMANCE_SSH_KEY" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
+    - echo "StrictHostKeyChecking no" > ~/.ssh/config
+  script:
+    - ./conformance/capture.sh "$RKE2_VERSION" "$CONFORMANCE_SSH_TARGET"
+    - |
+      if ! git diff --quiet conformance/testdata/; then
+        echo "############################################################"
+        echo "# RKE2 PROTOCOL DRIFT DETECTED for $RKE2_VERSION"
+        echo "# Review the diff and update the shim before upgrading prod."
+        echo "############################################################"
+        git --no-pager diff conformance/testdata/
+        exit 1
+      fi
+      echo "no drift for $RKE2_VERSION"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+      allow_failure: true
+
+# One job per supported RKE2 minor. Add a row when you adopt a new version.
+conformance:1.31:
+  extends: .conformance
+  variables: {RKE2_VERSION: "v1.31.8+rke2r1"}
+
+conformance:1.35:
+  extends: .conformance
+  variables: {RKE2_VERSION: "v1.35.7+rke2r1"}

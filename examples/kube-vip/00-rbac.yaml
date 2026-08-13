@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: kube-vip, namespace: kube-system}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: system:kube-vip-role}
+rules:
+  - apiGroups: [""]
+    resources: [services, services/status, endpoints, nodes, pods]
+    verbs: [list, get, watch, update, patch]
+  - apiGroups: [coordination.k8s.io]
+    resources: [leases]
+    verbs: [list, get, watch, update, create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata: {name: system:kube-vip-binding}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: system:kube-vip-role}
+subjects: [{kind: ServiceAccount, name: kube-vip, namespace: kube-system}]

@@ -1,0 +1,37 @@
+# Make a Talos control plane read and write Secrets in the SAME encrypted form
+# as the RKE2 cluster it is joining, WITHOUT touching RKE2.
+#
+# Why this is needed: Kubernetes prefixes each encrypted value with the key
+# NAME. RKE2 uses "aescbckey"; Talos hardcodes "key1" and offers no way to
+# change it (the --encryption-provider-config arg is MergeDenied and the name is
+# a literal in k8stemplates/apiserver.go). With identical key material the two
+# still cannot read each other's Secrets. extraVolumes are mounted after Talos'
+# own, so they can shadow the generated file.
+#
+# Fill in name+secret verbatim from, on an RKE2 server:
+#   /var/lib/rancher/rke2/server/cred/encryption-config.json
+machine:
+  files:
+    - path: /var/lib/k8s-enc/encryptionconfig.yaml
+      # 0444 is load-bearing: the file is root:root and kube-apiserver runs as
+      # UID 65534. With 0400 the apiserver will not start.
+      permissions: 0o444
+      op: create
+      content: |
+        apiVersion: v1
+        kind: EncryptionConfig
+        resources:
+        - providers:
+          - aescbc:
+              keys:
+              - name: aescbckey
+                secret: REPLACE_WITH_RKE2_AESCBC_KEY_MATERIAL
+          - identity: {}
+          resources:
+          - secrets
+cluster:
+  apiServer:
+    extraVolumes:
+      - hostPath: /var/lib/k8s-enc/encryptionconfig.yaml
+        mountPath: /system/secrets/kubernetes/kube-apiserver/encryptionconfig.yaml
+        readonly: true

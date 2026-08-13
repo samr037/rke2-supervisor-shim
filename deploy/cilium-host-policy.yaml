@@ -1,0 +1,80 @@
+# Cilium host firewall for the control-plane node (OPTIONAL, defence in depth).
+#
+# Cilium is the one CNI that can police hostNetwork traffic: a
+# CiliumClusterwideNetworkPolicy with a nodeSelector (rather than an
+# endpointSelector) attaches to the host endpoint itself.
+#
+# REQUIRES: cilium installed with hostFirewall.enabled=true - NOT the default.
+#   helm upgrade cilium ... --set hostFirewall.enabled=true
+#
+# Prefer deploy/talos-ingress-firewall.yaml as the primary control: it has no
+# prerequisites and keeps enforcing if Cilium is degraded or being upgraded.
+# Use this in addition, if you want the policy expressed as Kubernetes objects.
+#
+# WARNING: like the Talos firewall, an incomplete rule set locks you out. Cilium
+# has no equivalent of `--mode=try`; stage it on one node and keep a second path
+# to the machine open.
+---
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: control-plane-host-ingress
+spec:
+  description: >-
+    Restrict host-network ports on control-plane nodes, including the
+    rke2-supervisor-shim on 9345 and its metrics on 9346, which NetworkPolicy
+    cannot reach because the shim is a hostNetwork pod.
+  nodeSelector:
+    matchLabels:
+      node-role.kubernetes.io/control-plane: ""
+  ingress:
+    # Kubernetes API - management and cluster nodes
+    - fromCIDR:
+        - 10.0.0.0/24
+      toPorts:
+        - ports:
+            - {port: "6443", protocol: TCP}
+
+    # Talos apid / trustd
+    - fromCIDR:
+        - 10.0.0.0/24
+      toPorts:
+        - ports:
+            - {port: "50000", protocol: TCP}
+            - {port: "50001", protocol: TCP}
+
+    # rke2 supervisor: only subnets whose machines may become nodes
+    - fromCIDR:
+        - 10.0.0.0/24
+      toPorts:
+        - ports:
+            - {port: "9345", protocol: TCP}
+
+    # shim metrics: scraper only (unauthenticated, leaks node names)
+    - fromCIDR:
+        - 10.0.0.16/32
+      toPorts:
+        - ports:
+            - {port: "9346", protocol: TCP}
+
+    # kubelet + kube-proxy health, from cluster nodes
+    - fromCIDR:
+        - 10.0.0.0/24
+      toPorts:
+        - ports:
+            - {port: "10250", protocol: TCP}
+            - {port: "10256", protocol: TCP}
+
+    # etcd: control-plane peers ONLY
+    - fromCIDR:
+        - 10.0.0.245/32
+      toPorts:
+        - ports:
+            - {port: "2379", protocol: TCP}
+            - {port: "2380", protocol: TCP}
+
+    # in-cluster traffic (pods to host services)
+    - fromEntities:
+        - cluster
+        - health
+        - remote-node

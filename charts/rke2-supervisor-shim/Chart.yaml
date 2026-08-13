@@ -1,0 +1,10 @@
+apiVersion: v2
+name: rke2-supervisor-shim
+description: Serve the RKE2 supervisor API from a Talos control plane so stock rke2 agents can join it
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords: [talos, rke2, kubernetes, supervisor]
+home: https://github.com/samr037/rke2-supervisor-shim
+maintainers:
+  - name: samr037

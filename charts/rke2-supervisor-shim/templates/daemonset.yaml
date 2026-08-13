@@ -1,0 +1,125 @@
+{{- if and (not .Values.agentConfig.existingConfigMap) (not .Values.agentConfig.contents) }}
+{{- fail "agentConfig: set either existingConfigMap or contents (--set-file agentConfig.contents=<captured /v1-rke2/config>). See docs/compatibility.md." }}
+{{- end }}
+{{- if .Values.agentConfig.contents }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "shim.agentConfigMap" . }}
+  namespace: {{ include "shim.namespace" . }}
+  labels: {{- include "shim.labels" . | nindent 4 }}
+data:
+  agent-config.json: |
+{{ .Values.agentConfig.contents | indent 4 }}
+---
+{{- end }}
+# A DaemonSet, not a Deployment: rke2 assumes a supervisor is co-located with
+# EVERY apiserver. Agents take the address list from /v1-rke2/apiservers and
+# dial each of them on :9345 for the tunnel, so every control-plane node must
+# run a shim. One replica works with a single CP and breaks on the second.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "shim.name" . }}
+  namespace: {{ include "shim.namespace" . }}
+  labels: {{- include "shim.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels: {{- include "shim.selectorLabels" . | nindent 6 }}
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        {{- include "shim.labels" . | nindent 8 }}
+        {{- include "shim.selectorLabels" . | nindent 8 }}
+      annotations:
+        # Restart when the served agent config changes.
+        checksum/agent-config: {{ .Values.agentConfig.contents | default .Values.agentConfig.existingConfigMap | sha256sum }}
+        {{- with .Values.podAnnotations }}{{- toYaml . | nindent 8 }}{{- end }}
+    spec:
+      serviceAccountName: {{ include "shim.name" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      # The image runs as nonroot (65532); Secret volumes are root-owned, so
+      # without fsGroup the CA files are unreadable.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+      # Mandatory: agents dial <apiserver-ip>:9345, so the supervisor must
+      # listen on the control-plane node's own address.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: shim
+          image: {{ include "shim.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --listen=:{{ .Values.supervisorPort }}
+            {{- if .Values.cluster.apiServers }}
+            - --apiservers={{ join "," .Values.cluster.apiServers }}
+            {{- else }}
+            # no --apiservers: control-plane nodes are discovered and refreshed
+            - --apiserver-port={{ .Values.cluster.apiServerPort }}
+            {{- end }}
+            - --cluster-dns={{ .Values.cluster.clusterDNS }}
+            - --cluster-domain={{ .Values.cluster.clusterDomain }}
+            - --pod-cidr={{ .Values.cluster.podCIDR }}
+            - --service-cidr={{ .Values.cluster.serviceCIDR }}
+            - --metrics-listen=:{{ .Values.metrics.port }}
+            - --tunnel={{ .Values.tunnel.enabled }}
+            {{- if and .Values.servingCert.certFile .Values.servingCert.keyFile }}
+            - --tls-cert=/pki/{{ .Values.servingCert.certFile }}
+            - --tls-key=/pki/{{ .Values.servingCert.keyFile }}
+            {{- end }}
+            {{- with .Values.servingCert.extraSANs }}
+            - --extra-sans={{ join "," . }}
+            {{- end }}
+          env:
+            - name: SHIM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.token.existingSecret }}
+                  key: {{ .Values.token.key }}
+            # SANs for the self-managed serving certificate
+            - {name: NODE_IP,   valueFrom: {fieldRef: {fieldPath: status.hostIP}}}
+            - {name: NODE_NAME, valueFrom: {fieldRef: {fieldPath: spec.nodeName}}}
+          ports:
+            - {name: supervisor, containerPort: {{ .Values.supervisorPort }}, protocol: TCP}
+            {{- if .Values.metrics.enabled }}
+            - {name: metrics, containerPort: {{ .Values.metrics.port }}, protocol: TCP}
+            {{- end }}
+          volumeMounts:
+            - {name: pki, mountPath: /pki, readOnly: true}
+            - {name: agent-config, mountPath: /etc/rke2-shim, readOnly: true}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          readinessProbe:
+            httpGet: {path: /healthz, port: {{ .Values.metrics.port }}}
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: {{ .Values.metrics.port }}}
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          {{- with .Values.resources }}
+          resources: {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        # cluster-ca.crt/.key: the CA that signs agent certificates. Created out
+        # of band - a chart is committed, a private key must not be.
+        - {name: pki, secret: {secretName: {{ .Values.pki.existingSecret }}, defaultMode: 0440}}
+        - {name: agent-config, configMap: {name: {{ include "shim.agentConfigMap" . }}}}

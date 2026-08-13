@@ -1,0 +1,113 @@
+# rke2-supervisor-shim
+#
+# Serves the RKE2 supervisor API on :9345 from a Talos control plane so stock
+# rke2 agents can join it.
+
+image:
+  repository: ghcr.io/samr037/rke2-supervisor-shim
+  tag: ""                      # defaults to .Chart.AppVersion
+  pullPolicy: IfNotPresent
+imagePullSecrets: []   # e.g. [{name: my-registry-creds}] for a private registry
+
+namespace:
+  # The chart creates its own namespace because it needs a PodSecurity label:
+  # the shim is hostNetwork, which "baseline" (enforced by Talos) forbids.
+  # `helm --create-namespace` cannot set labels, hence this.
+  create: true
+  name: rke2-shim
+
+cluster:
+  clusterDNS: 10.96.0.10
+  clusterDomain: cluster.local
+  podCIDR: 10.244.0.0/16
+  serviceCIDR: 10.96.0.0/12
+
+  # Leave empty to discover control-plane nodes from the API and keep the list
+  # refreshed. Every advertised address must run a shim - which the DaemonSet
+  # guarantees. Set only to pin the list, e.g. ["10.0.0.1:6443"].
+  apiServers: []
+  apiServerPort: 6443
+
+# The join token agents present. Supply it out of band - do not commit it.
+#   kubectl -n rke2-shim create secret generic rke2-shim-token \
+#     --from-literal=token="$(openssl rand -hex 24)"
+token:
+  existingSecret: rke2-shim-token
+  key: token
+
+# The Kubernetes cluster CA that signs agent certificates.
+#
+# NOT templated on purpose: this is a PRIVATE KEY, and a chart is something you
+# commit. Create it out of band and reference it here:
+#   kubectl -n rke2-shim create secret generic rke2-shim-pki \
+#     --from-file=cluster-ca.crt=./cluster-ca.crt \
+#     --from-file=cluster-ca.key=./cluster-ca.key
+pki:
+  existingSecret: rke2-shim-pki
+
+# A /v1-rke2/config captured from a REAL rke2 server of the version your agents
+# run. See docs/compatibility.md for why this is a capture, not hand-written.
+agentConfig:
+  # Reference a ConfigMap you already created...
+  existingConfigMap: ""
+  # ...or let the chart create one from a file:
+  #   helm install ... --set-file agentConfig.contents=conformance/testdata/v1.31.8+rke2r1/config.json
+  contents: ""
+
+servingCert:
+  # Empty: the shim mints its own from the cluster CA and rotates it, with SANs
+  # discovered from the node. Set both to use an externally managed pair from
+  # the PKI secret (e.g. cert-manager).
+  certFile: ""
+  keyFile: ""
+  extraSANs: []              # additional IPs or DNS names, e.g. a VIP
+
+metrics:
+  enabled: true
+  port: 9346
+  # WARNING: hostNetwork means this listens on the node address, unauthenticated.
+  # Restrict it at the host firewall - see docs/network-security.md.
+  serviceMonitor:
+    enabled: false
+    interval: 60s
+    labels: {}
+
+supervisorPort: 9345
+
+# The remotedialer tunnel (/v1-rke2/connect). Agents connect unconditionally;
+# disabling it only produces reconnect errors in their logs.
+tunnel:
+  enabled: true
+
+# A default-deny floor for other pods in this namespace. It does NOT protect the
+# shim, which is hostNetwork and therefore exempt from NetworkPolicy entirely.
+networkPolicy:
+  enabled: false
+
+rbac:
+  create: true
+  # An rke2 agent authenticates to the apiserver as CN=system:rke2-controller to
+  # label its own node. A real rke2 server creates this binding; Talos has never
+  # heard of the identity.
+  createRKE2ControllerBinding: true
+
+resources:
+  requests: {cpu: 50m, memory: 64Mi}
+  limits: {memory: 256Mi}
+
+# The EMPTY STRING is load-bearing. Talos labels control planes with "", RKE2
+# labels them "true", so matching "" is what keeps the shim off the RKE2 servers
+# while both control planes coexist. On an RKE2 server rke2-server already owns
+# :9345 and this hostNetwork pod will crashloop. Do not relax this to an
+# Exists-style affinity.
+nodeSelector:
+  node-role.kubernetes.io/control-plane: ""
+
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+
+priorityClassName: system-cluster-critical
+
+podAnnotations: {}

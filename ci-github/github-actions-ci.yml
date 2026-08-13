@@ -1,0 +1,33 @@
+name: ci
+on:
+  push: {branches: [main]}
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.26'}
+      - run: go vet ./...
+      # Replays protocol contracts captured from real rke2 servers.
+      # No cluster or VM required. See docs/compatibility.md.
+      - run: go test -race ./...
+      - run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+  image:
+    needs: test
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions: {contents: read, packages: write}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: {go-version: '1.26'}
+      - uses: ko-build/setup-ko@v0.6
+      # ko cross-compiles Go natively, so arm64 is built at full speed rather
+      # than emulated under QEMU.
+      - run: ko build ./cmd/shim --platform=linux/amd64,linux/arm64 --bare
+             --tags="${{ github.sha }},latest"
+        env:
+          KO_DOCKER_REPO: ghcr.io/${{ github.repository_owner }}/rke2-supervisor-shim

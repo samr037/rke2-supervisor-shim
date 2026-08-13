@@ -1,0 +1,62 @@
+# Kubernetes NetworkPolicy for the rke2-shim namespace.
+#
+# READ THIS BEFORE TRUSTING IT
+# ----------------------------
+# NetworkPolicy does NOT apply to hostNetwork pods, and the shim must run with
+# hostNetwork (an agent dials <apiserver-ip>:9345 for the tunnel). So this
+# policy does NOT protect :9345 or :9346. Use deploy/talos-ingress-firewall.yaml
+# for that - it is the control that actually applies.
+#
+# What this file is for: a default-deny floor so that any *other* pod later
+# added to this namespace is locked down by default rather than wide open, and
+# so the intent is written down where an auditor will look for it.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: rke2-shim
+  annotations:
+    note: >-
+      Does not cover the shim itself, which is hostNetwork. Host-level
+      enforcement lives in deploy/talos-ingress-firewall.yaml.
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# Allow DNS for any non-hostNetwork pod added here later.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: rke2-shim
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+# The shim needs the apiserver (node-password Secrets, expiry events). Listed
+# for completeness and for the day it stops being hostNetwork; today the
+# hostNetwork exemption means it is not enforced.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-apiserver-egress
+  namespace: rke2-shim
+spec:
+  podSelector:
+    matchLabels: {app: rke2-supervisor-shim}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock: {cidr: 0.0.0.0/0}
+      ports:
+        - {protocol: TCP, port: 6443}

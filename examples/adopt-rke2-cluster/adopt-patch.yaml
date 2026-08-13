@@ -1,0 +1,53 @@
+machine:
+  install:
+    disk: /dev/sda
+  network:
+    nameservers: [10.0.0.253]
+    interfaces:
+      - deviceSelector:
+          hardwareAddr: "bc:24:11:00:aa:06"
+        dhcp: false
+        # The prefix must match the REAL subnet, not the node's visual third
+        # octet. Copying /24 onto a /20 network puts the gateway outside the
+        # prefix and the node comes up with no route.
+        addresses: [10.0.0.201/24]
+        routes:
+          - network: 0.0.0.0/0
+            gateway: 10.0.0.254
+  certSANs: [10.0.0.201]
+cluster:
+  network:
+    cni:
+      name: none
+  proxy:
+    disabled: true
+  coreDNS:
+    disabled: true
+  apiServer:
+    extraArgs:
+      # Talos defaults both to its own endpoint; RKE2 uses the in-cluster
+      # issuer. Without these, tokens minted on the Talos node are rejected by
+      # every RKE2 apiserver (401) - Cilium is usually the first casualty.
+      # The signing key is already shared via the PKI import.
+      service-account-issuer: https://kubernetes.default.svc.cluster.local
+      api-audiences: https://kubernetes.default.svc.cluster.local,rke2
+    certSANs: [10.0.0.201, 10.0.0.251]
+  aescbcEncryptionSecret: <BASE64-AESCBC-KEY-FROM-RKE2-encryption-config.json>
+  etcd:
+    # THE KEY TO THE WHOLE THING. Talos only calls buildInitialCluster() - the
+    # etcd CLIENT call that RKE2 rejects on TLS - when "initial-cluster" is NOT
+    # in extraArgs (services/etcd.go:520). Supplying it here skips that call
+    # entirely, and the node joins over the PEER protocol, which our peer-ca
+    # signed cert is accepted for.
+    extraArgs:
+      initial-cluster: "rke2-oracle-c8a359a8=https://10.0.0.251:2380,talos-adopt-1=https://10.0.0.201:2380"
+      initial-cluster-state: existing
+---
+# This second document is MANDATORY, not stylistic: talosctl 1.13 always emits
+# a HostnameConfig (auto: stable), and additionally setting
+# machine.network.hostname fails validation with
+# "static hostname is already set in v1alpha1 config".
+apiVersion: v1alpha1
+kind: HostnameConfig
+hostname: talos-adopt-1
+auto: off

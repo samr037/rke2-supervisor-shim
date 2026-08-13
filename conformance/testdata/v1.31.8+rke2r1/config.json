@@ -1,0 +1,143 @@
+{
+  "APIServerBindAddress": "0.0.0.0",
+  "APIServerPort": 6443,
+  "AdvertiseIP": "",
+  "AdvertisePort": 6443,
+  "BindAddress": "",
+  "CipherSuites": [
+    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+    "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305",
+    "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305"
+  ],
+  "ClusterDNS": "10.43.0.10",
+  "ClusterDNSs": [
+    "10.43.0.10"
+  ],
+  "ClusterDomain": "cluster.local",
+  "ClusterIPRange": {
+    "IP": "10.42.0.0",
+    "Mask": "//8AAA=="
+  },
+  "ClusterIPRanges": [
+    {
+      "IP": "10.42.0.0",
+      "Mask": "//8AAA=="
+    }
+  ],
+  "ClusterInit": true,
+  "ClusterReset": false,
+  "ClusterResetRestorePath": "",
+  "DataDir": "/var/lib/rancher/rke2/server",
+  "DefaultLocalStoragePath": "/var/lib/rancher/rke2/storage",
+  "DisableAPIServer": false,
+  "DisableAgent": false,
+  "DisableCCM": false,
+  "DisableControllerManager": false,
+  "DisableETCD": false,
+  "DisableHelmController": false,
+  "DisableKubeProxy": false,
+  "DisableNPC": true,
+  "DisableScheduler": false,
+  "DisableServiceLB": true,
+  "Disables": {
+    "coredns": true,
+    "harvester-cloud-provider": true,
+    "harvester-csi-driver": true,
+    "rancher-vsphere-cpi": true,
+    "rancher-vsphere-csi": true,
+    "rke2-calico": true,
+    "rke2-calico-crd": true,
+    "rke2-cilium": true,
+    "rke2-cilium-crd": true,
+    "rke2-flannel": true,
+    "rke2-flannel-crd": true,
+    "rke2-kube-proxy": true,
+    "rke2-multus": true,
+    "rke2-traefik": true,
+    "rke2-traefik-crd": true,
+    "servicelb": true
+  },
+  "EgressSelectorMode": "agent",
+  "EmbeddedRegistry": false,
+  "EncryptProvider": "aescbc",
+  "EncryptSecrets": true,
+  "ExtraAPIArgs": [
+    "enable-admission-plugins=NodeRestriction",
+    "tls-cipher-suites=TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305"
+  ],
+  "ExtraCloudControllerArgs": null,
+  "ExtraControllerArgs": null,
+  "ExtraEtcdArgs": null,
+  "ExtraSchedulerAPIArgs": null,
+  "FlannelBackend": "none",
+  "FlannelExternalIP": false,
+  "FlannelIPv6Masq": false,
+  "HTTPSPort": 6443,
+  "HelmJobImage": "",
+  "IPSECPSK": "",
+  "JoinURL": "",
+  "KineTLS": false,
+  "KubeConfigGroup": "",
+  "KubeConfigMode": "0644",
+  "KubeConfigOutput": "",
+  "MinTLSVersion": "",
+  "NoLeaderElect": false,
+  "PrivateIP": "",
+  "Rootless": false,
+  "SANSecurity": true,
+  "SANs": [
+    "127.0.0.1",
+    "::1",
+    "localhost",
+    "rke2-oracle",
+    "10.0.0.251",
+    "2a01:e0a:c00:22d0:be24:11ff:fe00:aa04",
+    "10.43.0.1",
+    "kubernetes",
+    "kubernetes.default",
+    "kubernetes.default.svc",
+    "kubernetes.default.svc.cluster.local"
+  ],
+  "ServerNodeName": "rke2-oracle",
+  "ServiceIPRange": {
+    "IP": "10.43.0.0",
+    "Mask": "//8AAA=="
+  },
+  "ServiceIPRanges": [
+    {
+      "IP": "10.43.0.0",
+      "Mask": "//8AAA=="
+    }
+  ],
+  "ServiceLBNamespace": "kube-system",
+  "ServiceNodePortRange": {
+    "Base": 30000,
+    "Size": 2768
+  },
+  "Skips": {
+    "coredns": true,
+    "harvester-cloud-provider": true,
+    "harvester-csi-driver": true,
+    "rancher-vsphere-cpi": true,
+    "rancher-vsphere-csi": true,
+    "rke2-calico": true,
+    "rke2-calico-crd": true,
+    "rke2-cilium": true,
+    "rke2-cilium-crd": true,
+    "rke2-flannel": true,
+    "rke2-flannel-crd": true,
+    "rke2-kube-proxy": true,
+    "rke2-multus": true,
+    "rke2-traefik": true,
+    "rke2-traefik-crd": true,
+    "servicelb": true
+  },
+  "SupervisorMetrics": false,
+  "SupervisorPort": 9345,
+  "SystemDefaultRegistry": "",
+  "VLevel": 0,
+  "VModule": ""
+}
