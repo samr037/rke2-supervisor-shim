@@ -81,12 +81,20 @@ jobs:
           KO_DOCKER_REPO: ghcr.io/${{ github.repository_owner }}/rke2-supervisor-shim
           TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          ko build ./cmd/shim --platform=linux/amd64,linux/arm64 --bare \
-            --tags="$TAG" --image-refs=image-refs.txt
-          cat image-refs.txt
-          # The multi-arch index is the last reference ko reports.
-          digest=$(tail -n1 image-refs.txt | sed -n 's/.*@\(sha256:[0-9a-f]\{64\}\)$/\1/p')
-          if [ -z "$digest" ]; then echo "::error::no digest in image-refs.txt"; exit 1; fi
+          # ko prints exactly one reference on stdout: the multi-arch index.
+          # --image-refs is not used because it also lists the per-platform
+          # images, and its last line is one of those - signing that left the
+          # index (what a tag or index digest resolves to) unsigned.
+          ref=$(ko build ./cmd/shim --platform=linux/amd64,linux/arm64 --bare --tags="$TAG")
+          echo "$ref"
+          digest=$(printf '%s\n' "$ref" | sed -n 's/.*@\(sha256:[0-9a-f]\{64\}\)$/\1/p')
+          if [ -z "$digest" ]; then echo "::error::no digest in ko output"; exit 1; fi
+          # Fail rather than sign the wrong thing: the digest must be an index.
+          mt=$(docker buildx imagetools inspect --raw "$KO_DOCKER_REPO@$digest" | jq -r .mediaType)
+          case "$mt" in
+            *image.index*|*manifest.list*) ;;
+            *) echo "::error::$digest is $mt, not a multi-arch index"; exit 1 ;;
+          esac
           echo "name=$KO_DOCKER_REPO" >> "$GITHUB_OUTPUT"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
