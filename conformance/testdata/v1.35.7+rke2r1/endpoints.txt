@@ -1,0 +1,9 @@
+GET  /v1-rke2/config                          200
+GET  /v1-rke2/readyz                          503
+GET  /v1-rke2/apiservers                      200
+GET  /v1-rke2/client-ca.crt                   200
+GET  /v1-rke2/server-ca.crt                   200
+POST /v1-rke2/serving-kubelet.crt             400 (no node headers)
+POST /v1-rke2/client-kubelet.crt              400 (no node headers)
+POST /v1-rke2/client-kube-proxy.crt           200 (no node headers)
+POST /v1-rke2/client-rke2-controller.crt      200 (no node headers)

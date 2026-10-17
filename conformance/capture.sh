@@ -74,7 +74,11 @@ echo "$INSTALL_SHA256  $tmp" | sha256sum -c --quiet - \
   || { echo "install.sh digest mismatch for $VERSION - refusing to run it" >&2; exit 1; }
 sudo INSTALL_RKE2_VERSION="$VERSION" sh "$tmp" >/dev/null
 sudo mkdir -p /etc/rancher/rke2
-printf 'token: "%s"\nwrite-kubeconfig-mode: "0644"\n' "$TOKEN" | sudo tee /etc/rancher/rke2/config.yaml >/dev/null
+# disable: rke2-kube-proxy reproduces the oracle the committed captures came
+# from (Disables/Skips list rke2-kube-proxy, DisableKubeProxy stays false).
+# Without it a re-capture drifts from testdata for a reason that is about the
+# oracle's setup, not the protocol.
+printf 'token: "%s"\nwrite-kubeconfig-mode: "0644"\ndisable:\n  - rke2-kube-proxy\n' "$TOKEN" | sudo tee /etc/rancher/rke2/config.yaml >/dev/null
 sudo chmod 600 /etc/rancher/rke2/config.yaml
 sudo systemctl enable --now rke2-server >/dev/null 2>&1 &
 EOS

@@ -140,6 +140,28 @@ func checkPublicKey(pub any) error {
 
 const minRSABits = 2048
 
+// CheckCSR applies every check Sign applies to the CSR itself, so a caller can
+// refuse a bad request before it has side effects (enrolling a node password)
+// rather than after.
+func CheckCSR(csrDER []byte) error {
+	_, err := parseCSR(csrDER)
+	return err
+}
+
+func parseCSR(csrDER []byte) (*x509.CertificateRequest, error) {
+	csr, err := x509.ParseCertificateRequest(csrDER)
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse: %v", ErrBadCSR, err)
+	}
+	if err := csr.CheckSignature(); err != nil {
+		return nil, fmt.Errorf("%w: self-signature invalid: %v", ErrBadCSR, err)
+	}
+	if err := checkPublicKey(csr.PublicKey); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrBadCSR, err)
+	}
+	return csr, nil
+}
+
 // notAfter caps a leaf's lifetime at its issuer's: a certificate cannot be
 // valid for longer than the CA that vouches for it, and verifiers reject the
 // excess anyway - silently, and only once the CA has expired.
@@ -156,15 +178,9 @@ func (ca *CA) notAfter(now time.Time, ttl time.Duration) time.Time {
 // followed by the CA PEM, which is the wire format the agent expects, and the
 // leaf's expiry.
 func (ca *CA) Sign(csrDER []byte, req Request) ([]byte, time.Time, error) {
-	csr, err := x509.ParseCertificateRequest(csrDER)
+	csr, err := parseCSR(csrDER)
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("%w: parse: %v", ErrBadCSR, err)
-	}
-	if err := csr.CheckSignature(); err != nil {
-		return nil, time.Time{}, fmt.Errorf("%w: self-signature invalid: %v", ErrBadCSR, err)
-	}
-	if err := checkPublicKey(csr.PublicKey); err != nil {
-		return nil, time.Time{}, fmt.Errorf("%w: %v", ErrBadCSR, err)
+		return nil, time.Time{}, err
 	}
 
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))

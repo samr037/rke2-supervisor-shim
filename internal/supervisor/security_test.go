@@ -49,8 +49,9 @@ func TestNodeCertRequiresNodePassword(t *testing.T) {
 			store := &recordingStore{allow: true}
 			s := serverWithStore(store)
 
+			// A valid CSR: the password check, not CSR validation, must refuse.
 			req := httptest.NewRequest(http.MethodPost, "/v1-rke2/"+kind+".crt",
-				strings.NewReader("not-a-real-csr"))
+				bytes.NewReader(testCSR(t)))
 			req.SetBasicAuth("node", "test-token")
 			req.Header.Set(hdrNodeName, "victim-node")
 			// deliberately no Rke2-Node-Password
@@ -76,7 +77,7 @@ func TestNodeCertRejectsWrongNodePassword(t *testing.T) {
 	s := serverWithStore(store)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1-rke2/client-kubelet.crt",
-		strings.NewReader("csr"))
+		bytes.NewReader(testCSR(t)))
 	req.SetBasicAuth("node", "test-token")
 	req.Header.Set(hdrNodeName, "victim-node")
 	req.Header.Set(hdrNodePassword, "guessed-password")

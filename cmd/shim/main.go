@@ -14,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	stdlog "log"
 	"log/slog"
 	"net"
 	"net/http"
@@ -274,7 +275,7 @@ func main() {
 	tlsCfg.ClientAuth = tls.VerifyClientCertIfGiven
 	tlsCfg.ClientCAs = pool
 
-	server := newMainServer(o.listen, mux, tlsCfg)
+	server := newMainServer(o.listen, mux, tlsCfg, log)
 
 	log.Info("rke2-supervisor-shim starting",
 		"listen", o.listen, "apiservers", cfg.APIServers,
@@ -287,19 +288,36 @@ func main() {
 	}
 }
 
-func newMainServer(addr string, h http.Handler, tlsCfg *tls.Config) *http.Server {
+func newMainServer(addr string, h http.Handler, tlsCfg *tls.Config, log *slog.Logger) *http.Server {
 	// No ReadTimeout/WriteTimeout: /v1-rke2/connect is a websocket that lives
 	// as long as the agent does, and those apply to the whole connection. The
 	// CSR endpoints set their own deadlines instead.
 	return &http.Server{
 		Addr:              addr,
 		Handler:           h,
+		ErrorLog:          stdlog.New(serverErrorWriter{log}, "", 0),
 		ReadHeaderTimeout: 15 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 		// Agent requests carry a handful of short headers.
 		MaxHeaderBytes: 64 << 10,
 		TLSConfig:      tlsCfg,
 	}
+}
+
+// serverErrorWriter routes net/http's own error log into slog. TLS handshake
+// failures are routine on a port that a TCP liveness probe, port scanners and
+// agents still learning the CA all touch, so they go to Debug; anything else
+// net/http reports (accept errors, handler panics) stays a warning.
+type serverErrorWriter struct{ log *slog.Logger }
+
+func (w serverErrorWriter) Write(p []byte) (int, error) {
+	msg := strings.TrimSpace(string(p))
+	if strings.Contains(msg, "TLS handshake error") {
+		w.log.Debug("http server", "msg", msg)
+	} else {
+		w.log.Warn("http server", "msg", msg)
+	}
+	return len(p), nil
 }
 
 // newMetricsServer returns nil for an empty address: that disables the

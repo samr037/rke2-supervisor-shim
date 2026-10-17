@@ -139,9 +139,10 @@ Non-negotiable invariants:
 
 ## Environment
 
-Development happened against a maquette on Proxmox (`pve2`, `10.0.0.220`). It
-no longer exists; every "verified" in the docs refers to it, and nothing since
-the 2026-10-17 audit has been run on it:
+Development happens against a maquette on Proxmox (`pve2`, `10.0.0.220`). The
+original one was destroyed; it was rebuilt on 2026-10-17 to live-verify the
+audit (docs/security.md, "Live verification"). It is disposable: check it
+exists before relying on it.
 
 | Host | Role |
 | --- | --- |

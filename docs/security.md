@@ -55,33 +55,38 @@ adoption and conformance scripts, and committed test data.
 
 Severity is the impact if exploited with the access the finding needs. The
 **Tested** column says how the fix is pinned: *unit* names the Go test,
-*none* means review only. No row is live-verified.
+*none* means review only. Rows marked **live** were also exercised against a
+real shim and a real rke2 agent on 2026-10-17 (see
+[Live verification](#live-verification-of-2026-10-17)).
 
 ### Summary
 
 | # | Finding | Severity | Tested |
 | --- | --- | --- | --- |
-| 1 | Token holder could take over any node with no recorded password, including Talos control planes | Critical | unit |
-| 2 | Node name not validated before it became a certificate CN and DNS SAN | High | unit |
-| 3 | Serving-certificate IP SANs taken verbatim from `Rke2-Node-Ip` | High | unit |
+| 1 | Token holder could take over any node with no recorded password, including Talos control planes | Critical | unit · **live** |
+| 2 | Node name not validated before it became a certificate CN and DNS SAN | High | unit · **live** |
+| 3 | Serving-certificate IP SANs taken verbatim from `Rke2-Node-Ip` | High | unit · **live** |
 | 4 | Certificates issued with no password check if no store was wired | Medium | unit |
-| 5 | Weak CSR public keys accepted | Medium | unit |
-| 6 | scrypt cost and concurrency dictated by stored data and request rate | Medium | unit |
-| 7 | Join token printed by `-h` and on any flag error | Medium | unit |
-| 8 | Tunnel: CN-only identity check, unbounded sessions and message size | Medium | unit |
+| 5 | Weak CSR public keys accepted | Medium | unit · **live** |
+| 6 | scrypt cost and concurrency dictated by stored data and request rate | Medium | unit · **live** |
+| 7 | Join token printed by `-h` and on any flag error | Medium | unit · **live** |
+| 8 | Tunnel: CN-only identity check, unbounded sessions and message size | Medium | unit · **live** |
 | 9 | Missing HTTP timeouts and limits on both listeners | Medium | unit |
 | 10 | Leaf lifetime could exceed the CA's; unusable CA accepted at startup | Low | unit |
-| 11 | Unauthenticated requests could flood the log at ERROR | Low | unit |
+| 11 | Unauthenticated requests could flood the log at ERROR | Low | unit · **live** |
 | 12 | Unusable control-plane addresses advertised; IPv6 mis-formatted | Low | unit |
 | 13 | Expiry Events created hourly without bound; metrics for deleted nodes kept forever | Low | unit |
 | 14 | `golang.org/x/{net,crypto,text}` behind known vulnerabilities | Medium | govulncheck |
 | 15 | Supply chain: mutable `latest` image, unsigned images, actions pinned by tag | High | none |
 | 16 | Shim ServiceAccount could write any `kube-system` Secret | High | none |
-| 17 | Shared `system:rke2-controller` identity can modify any Node | High | k3s impersonation, 12/12 — mitigation partial |
+| 17 | Shared `system:rke2-controller` identity can modify any Node | High | k3s impersonation, 12/12 — mitigation partial · **live** |
 | 18 | Cilium host policy opened every host port to every pod | High | none |
 | 19 | Chart and manifest hardening gaps; token passed as an environment variable | Low | none |
 | 20 | Operator scripts: remote output `eval`'d, key files created world-readable, unvalidated inputs | Medium | none |
-| 21 | Conformance capture: unpinned installer run as root, SSH host keys not checked, oracle identity committed | Medium | none |
+| 21 | Conformance capture: unpinned installer run as root, SSH host keys not checked, oracle identity committed | Medium | **live** (re-capture matches testdata byte for byte) |
+| 22 | A CSR refused for its key had already enrolled the node password (name squatting) — *found live* | Low | unit · **live** |
+| 23 | TCP liveness probe made net/http log a TLS handshake error every 20 s — *found live* | Low | unit |
+| 24 | `capture.sh` did not reproduce the oracle the captures came from (`disable: rke2-kube-proxy`) — *found live* | Low | **live** |
 
 ### 1. Takeover of nodes that never enrolled — critical
 
@@ -391,12 +396,43 @@ anonymised the same way: a global IPv6 SAN had published the lab's ISP prefix
 and, through its EUI-64 interface ID, a MAC address. See
 [compatibility.md](compatibility.md).
 
+## Live verification of 2026-10-17
+
+The lab was rebuilt the same evening on Proxmox: one Talos v1.13.3 control
+plane (Kubernetes v1.36.1), one Debian 13 worker with a stock rke2
+v1.35.7+rke2r1 agent, and a throwaway rke2 server as conformance oracle. The
+chart was installed by following the README quick start, from the signed
+image (`cosign verify` passed first).
+
+| Check | Result |
+| --- | --- |
+| `capture.sh` against the oracle | installer sha256 verified; output scrubbed; after fix 24, identical to `testdata/` |
+| Agent join (`server` + `token` only) | Node Ready in 18 s; 4 certificates issued; tunnel up |
+| 7 functional checks (pod↔pod both ways, ClusterIP, DNS, logs, exec, system pods) | 7/7 |
+| Worker reboot | re-joined with its stored password (no 409), tunnel back, logs and exec work |
+| Take over the Talos control plane by name (#1) | 409 `node already exists with no recorded node password` |
+| Existing node, wrong password | 409 |
+| Reserved name `kubernetes.default.svc` (#2) | 400 |
+| Serving SAN `10.96.0.1` / control-plane IP / `169.254.1.1` (#3) | 400 / 400 / 400; a normal IP gets exactly `node, localhost, 127.0.0.1, ::1, <ip>` |
+| RSA-1024 CSR (#5) | 400 — but the password was enrolled first: finding 22, fixed |
+| Password of 1 byte (#6) | 400 |
+| `system:rke2-controller` cert, obtained with the token alone (#17) | ordinary label allowed; taint, cordon, adding or removing `node-role.kubernetes.io/*` denied by the policy; Secrets and Node deletion forbidden by RBAC |
+| The real agent under that policy | no denial in its log; it sets `rke2.io/node-args`, `node-config-hash`, `node-env` annotations |
+| Tunnel with a non-node cert / no cert (#8) | 401 / 401 |
+| Tunnel sessions for one node | 2 accepted, 3rd 429; a 64 KiB message drops the session |
+| Unauthenticated `/v1-rke2/config` (#11) | 401, one WARN, rate-limited |
+| Readiness probe (HTTPS `/cacerts`) and both admission policies auto-detected by the chart | as designed |
+
+Not covered by that run: v1.31.8 agents, two control planes, an adoption, the
+Cilium host policy (the lab uses Flannel), and the image signature path on a
+`vX.Y.Z` tag.
+
 ## Residual risks
 
 These remain after the audit. Each is a decision, not an oversight.
 
-- **No live verification of the audit.** Covered above; it is the largest
-  single caveat in this document.
+- **Live verification is partial.** One agent version, one control plane,
+  Flannel; see [Live verification](#live-verification-of-2026-10-17).
 - **The pod holds the cluster CA private key**, in memory and on a mounted
   Secret. Unavoidable: `serving-kubelet`, `client-kube-proxy` and
   `client-rke2-controller` have no built-in Kubernetes signer that fits, so even

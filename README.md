@@ -85,18 +85,17 @@ server, never inferred. Details: [docs/protocol.md](docs/protocol.md).
 | **v1.35.7+rke2r1** agents | ✅ contract captured · joined · 7/7 functional checks · tunnel up |
 | Two Talos control planes | ✅ both advertised automatically; an agent re-bootstrapped and tunnelled to the pair |
 | Adopting a live RKE2 cluster | ✅ end to end on a prod-shaped lab: Talos CP joined, worker migrated, RKE2 CP decommissioned, no downtime |
-| **Security hardening of 2026-10-17** | 🟡 **unit tests only** — not yet run against a real rke2 agent |
+| **Security hardening of 2026-10-17**, v1.35.7+rke2r1 agent | ✅ **live-verified the same day** on a rebuilt lab: join, 7/7 functional checks, tunnel, reboot re-join, and each new protection exercised against the real shim |
+| Hardening with v1.31.8 agents, two control planes, adoption | 🟡 not re-run since the audit (earlier results above predate it) |
 
 Live verification was on Talos v1.13.3 / Kubernetes v1.36.1, workers using a
-completely stock rke2 agent config. Functional checks: cross-node pod
-networking both ways, ClusterIP services, cluster DNS, `kubectl logs`,
-`kubectl exec`.
+completely stock rke2 agent config (`server` and `token`, nothing else).
+Functional checks: cross-node pod networking both ways, ClusterIP services,
+cluster DNS, `kubectl logs`, `kubectl exec`, and the node's system pods.
 
-All of that predates the 2026-10-17 audit, and the lab VMs no longer exist. The
-hardened shim adds checks a real agent has not yet been seen to pass (node-name
-and SAN validation, CSR key policy, tunnel limits, two admission policies). Run
-it on a staging cluster before production; see
-[docs/security.md](docs/security.md).
+The post-audit run installed the chart exactly as the quick start below says,
+from the signed image, and found three issues that unit tests had not (fixed
+since; see [docs/security.md](docs/security.md#live-verification-of-2026-10-17)).
 
 ## Quick start
 
@@ -153,6 +152,10 @@ Workers then use an ordinary rke2 agent config:
 server: https://<control-plane-ip>:9345
 token: <the token from rke2-shim-token>
 ```
+
+On a Talos cluster with its default Flannel, also give each worker the CNI
+plugins (with `flannel`) in `/opt/cni/bin` and a forwarder on
+`127.0.0.1:7445` to the control plane; see [Limitations](#limitations).
 
 Without Helm, apply [`deploy/shim.yaml`](deploy/shim.yaml) (it creates the
 labelled namespace itself) after creating the two Secrets and an
@@ -233,8 +236,13 @@ audit — threat model, every finding with its severity and test, residual risks
 - **CA rotation is a manual runbook**, deliberately not automated.
 - **Expiry warnings are verified synthetically**, never by a genuinely aged
   certificate.
-- **CNI binaries differ by RKE2 version on workers:** v1.35.7 populates
-  `/opt/cni/bin`, v1.31.8 leaves it empty.
+- **Workers need two things the agent does not install** on a Talos cluster
+  running its default Flannel (observed with v1.35.7 on 2026-10-17):
+  the CNI plugins plus the `flannel` plugin in `/opt/cni/bin` (the agent left
+  that directory absent), and something listening on `127.0.0.1:7445`, where
+  Talos points its Flannel DaemonSet (KubePrism exists only on Talos nodes;
+  an HAProxy forwarding to the control-plane endpoints is enough). Without
+  them pods on the worker stay in `ContainerCreating`.
 - **During an adoption, the Talos apiserver cannot reach un-migrated RKE2
   kubelets** (`401`): Talos has one signing key where RKE2 has two. It shrinks
   as workers migrate. See [docs/kubelet-egress.md](docs/kubelet-egress.md).

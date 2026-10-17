@@ -34,7 +34,7 @@ func TestEmptyMetricsListenDisablesMetrics(t *testing.T) {
 // http.ListenAndServe with no timeouts at all (gosec G114), so a client
 // trickling bytes held a goroutine and a socket forever.
 func TestServersHaveTimeouts(t *testing.T) {
-	m := newMainServer(":0", http.NewServeMux(), &tls.Config{})
+	m := newMainServer(":0", http.NewServeMux(), &tls.Config{}, slog.New(slog.DiscardHandler))
 	if m.ReadHeaderTimeout == 0 || m.IdleTimeout == 0 {
 		t.Errorf("main server: ReadHeaderTimeout=%s IdleTimeout=%s, want both set", m.ReadHeaderTimeout, m.IdleTimeout)
 	}
@@ -51,5 +51,26 @@ func TestServersHaveTimeouts(t *testing.T) {
 	if ms.ReadHeaderTimeout == 0 || ms.ReadTimeout == 0 || ms.WriteTimeout == 0 || ms.IdleTimeout == 0 {
 		t.Errorf("metrics server: ReadHeader=%s Read=%s Write=%s Idle=%s, want all set",
 			ms.ReadHeaderTimeout, ms.ReadTimeout, ms.WriteTimeout, ms.IdleTimeout)
+	}
+}
+
+// The liveness probe is a bare TCP connect to :9345 (deliberately - see the
+// chart), so net/http logged "TLS handshake error ... EOF" every 20s per node,
+// as unstructured stderr. Handshake failures go to Debug; anything else the
+// server reports stays visible.
+func TestHandshakeErrorsAreDebugOnly(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	s := newMainServer(":0", http.NewServeMux(), &tls.Config{}, log)
+	if s.ErrorLog == nil {
+		t.Fatal("main server has no ErrorLog: net/http writes straight to stderr")
+	}
+	s.ErrorLog.Print("http: TLS handshake error from 10.0.0.5:4242: EOF")
+	if buf.Len() != 0 {
+		t.Errorf("handshake error logged at Info: %s", buf.String())
+	}
+	s.ErrorLog.Print("http: Accept error: too many open files")
+	if !bytes.Contains(buf.Bytes(), []byte("too many open files")) {
+		t.Errorf("other server errors must stay visible, got %q", buf.String())
 	}
 }

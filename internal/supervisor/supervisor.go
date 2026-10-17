@@ -297,6 +297,13 @@ func (s *Server) handleCert(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	// Judged before the password store is touched: a CSR we would refuse at
+	// signing time must not enrol a node password as a side effect.
+	if err := pki.CheckCSR(csr); err != nil {
+		s.log.Warn("rejecting CSR", "path", r.URL.Path, "remote", r.RemoteAddr, "err", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	node := r.Header.Get(hdrNodeName)
 	kind := strings.TrimSuffix(pathBase(r.URL.Path), ".crt")

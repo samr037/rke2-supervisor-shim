@@ -186,3 +186,35 @@ func TestNodeNameIsValidated(t *testing.T) {
 		}
 	}
 }
+
+// Regression, found on the live lab: a node-scoped request whose CSR was later
+// refused for its key still enrolled the node password first, so a token
+// holder could squat node names without ever obtaining a certificate. The CSR
+// must be judged before anything is written.
+func TestRefusedCSRDoesNotEnrolAPassword(t *testing.T) {
+	k, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{}, k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"client-kubelet", "serving-kubelet"} {
+		store := &recordingStore{allow: true}
+		s := New(Config{Token: "t"}, testCA(t, "ca"), store, nil, slog.New(slog.DiscardHandler))
+		req := httptest.NewRequest(http.MethodPost, "/v1-rke2/"+kind+".crt", bytes.NewReader(der))
+		req.SetBasicAuth("node", "t")
+		req.Header.Set(hdrNodeName, "squatted-node")
+		req.Header.Set(hdrNodePassword, "0123456789abcdef0123456789abcdef")
+		req.Header.Set(hdrNodeIP, "192.0.2.50")
+		rec := httptest.NewRecorder()
+		s.handleCert(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: weak CSR gave %d, want 400", kind, rec.Code)
+		}
+		if store.called {
+			t.Errorf("%s: a refused CSR reached the password store and enrolled the name", kind)
+		}
+	}
+}
