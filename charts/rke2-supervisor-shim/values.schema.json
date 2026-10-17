@@ -1,0 +1,203 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "rke2-supervisor-shim values",
+  "type": "object",
+  "additionalProperties": false,
+  "definitions": {
+    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "dnsLabel": {
+      "type": "string",
+      "pattern": "^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$"
+    },
+    "dnsSubdomain": {
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+    },
+    "dnsName": {
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^([A-Za-z0-9]([-A-Za-z0-9]{0,61}[A-Za-z0-9])?)(\\.[A-Za-z0-9]([-A-Za-z0-9]{0,61}[A-Za-z0-9])?)*$"
+    },
+    "ipv4": {
+      "type": "string",
+      "pattern": "^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$"
+    },
+    "ipv6": {
+      "type": "string",
+      "pattern": "^[0-9A-Fa-f]{0,4}(:[0-9A-Fa-f]{0,4}){2,7}$"
+    },
+    "ip": {"anyOf": [{"$ref": "#/definitions/ipv4"}, {"$ref": "#/definitions/ipv6"}]},
+    "cidr": {
+      "description": "One IPv4 or IPv6 CIDR",
+      "type": "string",
+      "pattern": "^(((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])/(3[0-2]|[12]?[0-9])|[0-9A-Fa-f]{0,4}(:[0-9A-Fa-f]{0,4}){2,7}/(12[0-8]|1[01][0-9]|[1-9]?[0-9]))$"
+    },
+    "cidrList": {
+      "description": "A CIDR, or an IPv4,IPv6 dual-stack pair",
+      "type": "string",
+      "pattern": "^(((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])/(3[0-2]|[12]?[0-9])|[0-9A-Fa-f]{0,4}(:[0-9A-Fa-f]{0,4}){2,7}/(12[0-8]|1[01][0-9]|[1-9]?[0-9]))(,(((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])/(3[0-2]|[12]?[0-9])|[0-9A-Fa-f]{0,4}(:[0-9A-Fa-f]{0,4}){2,7}/(12[0-8]|1[01][0-9]|[1-9]?[0-9])))?$"
+    },
+    "fileName": {
+      "description": "A bare file name inside the mounted Secret: no '/', no '..'",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._-]+$",
+      "not": {"pattern": "\\.\\."}
+    },
+    "secretKey": {
+      "description": "A Secret data key; also used as a projected file name",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253,
+      "pattern": "^[-._A-Za-z0-9]+$",
+      "not": {"pattern": "^\\.\\.|\\.\\."}
+    },
+    "stringMap": {"type": "object", "additionalProperties": {"type": "string"}}
+  },
+  "properties": {
+    "global": {"type": "object"},
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository"],
+      "properties": {
+        "repository": {"type": "string", "minLength": 1, "pattern": "^[^\\s:@]+(:[0-9]+)?(/[^\\s:@]+)*$"},
+        "tag": {
+          "description": "Empty = Chart.AppVersion. 'latest' is refused: CI never publishes it and a moving tag defeats signing.",
+          "type": "string",
+          "pattern": "^$|^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$",
+          "not": {"enum": ["latest"]}
+        },
+        "digest": {"type": "string", "pattern": "^$|^sha256:[a-f0-9]{64}$"},
+        "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]}
+      }
+    },
+    "imagePullSecrets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {"name": {"$ref": "#/definitions/dnsSubdomain"}}
+      }
+    },
+    "namespace": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": {"type": "boolean"},
+        "name": {"$ref": "#/definitions/dnsLabel"}
+      }
+    },
+    "cluster": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "clusterDNS": {"$ref": "#/definitions/ip"},
+        "clusterDomain": {"$ref": "#/definitions/dnsName"},
+        "podCIDR": {"$ref": "#/definitions/cidrList"},
+        "serviceCIDR": {"$ref": "#/definitions/cidrList"},
+        "apiServers": {
+          "type": "array",
+          "items": {
+            "description": "host:port, e.g. 10.0.0.1:6443 or [fd00::1]:6443",
+            "type": "string",
+            "pattern": "^([A-Za-z0-9.-]+|\\[[0-9A-Fa-f:]+\\]):[0-9]{1,5}$"
+          }
+        },
+        "apiServerPort": {"$ref": "#/definitions/port"}
+      }
+    },
+    "token": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["existingSecret", "key"],
+      "properties": {
+        "existingSecret": {"$ref": "#/definitions/dnsSubdomain"},
+        "key": {"$ref": "#/definitions/secretKey"}
+      }
+    },
+    "pki": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["existingSecret"],
+      "properties": {
+        "existingSecret": {"$ref": "#/definitions/dnsSubdomain"}
+      }
+    },
+    "agentConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "existingConfigMap": {"anyOf": [{"const": ""}, {"$ref": "#/definitions/dnsSubdomain"}]},
+        "contents": {"type": "string"}
+      }
+    },
+    "servingCert": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "certFile": {"anyOf": [{"const": ""}, {"$ref": "#/definitions/fileName"}]},
+        "keyFile": {"anyOf": [{"const": ""}, {"$ref": "#/definitions/fileName"}]},
+        "extraSANs": {
+          "type": "array",
+          "items": {"anyOf": [{"$ref": "#/definitions/ip"}, {"$ref": "#/definitions/dnsName"}]}
+        }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "port": {"$ref": "#/definitions/port"},
+        "serviceMonitor": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "interval": {"type": "string", "pattern": "^([0-9]+(ms|s|m|h))+$"},
+            "labels": {"$ref": "#/definitions/stringMap"}
+          }
+        }
+      }
+    },
+    "supervisorPort": {"$ref": "#/definitions/port"},
+    "tunnel": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"enabled": {"type": "boolean"}}
+    },
+    "networkPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {"enabled": {"type": "boolean"}}
+    },
+    "rbac": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "create": {"type": "boolean"},
+        "createRKE2ControllerBinding": {"type": "boolean"}
+      }
+    },
+    "secretsAdmissionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"enum": ["auto", true, false]}
+      }
+    },
+    "rke2ControllerAdmissionPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {"enum": ["auto", true, false]}
+      }
+    },
+    "resources": {"type": "object"},
+    "nodeSelector": {"$ref": "#/definitions/stringMap"},
+    "tolerations": {"type": "array", "items": {"type": "object"}},
+    "priorityClassName": {"type": "string"},
+    "podAnnotations": {"$ref": "#/definitions/stringMap"}
+  }
+}

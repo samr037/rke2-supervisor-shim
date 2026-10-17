@@ -1,0 +1,55 @@
+# DEAD END — kept as documentation of what was tried. Do NOT apply.
+# Full reasoning and the exact errors: docs/kubelet-egress.md
+#
+# GOAL: make the Talos apiserver present RKE2's own kubelet-client identity
+# (O=system:masters, CN=system:apiserver, issued by client-ca) so that RKE2
+# kubelets stop answering 401 to `kubectl logs/exec` against un-migrated nodes.
+#
+# Both routes below are CLOSED on Talos 1.13.3, each verified on a live node
+# (and each took that node down while proving it):
+#
+#   1. extraArgs — Talos refuses the flag outright:
+#        error updating static pod for "APIServerConfigs.kubernetes.talos.dev":
+#          extra arg "kubelet-client-certificate" is not allowed
+#
+#   2. extraVolumes shadowing the real path — rejected on an unrelated limit.
+#      Talos derives the volume NAME from the mount path, so
+#        /system/secrets/kubernetes/kube-apiserver/apiserver-kubelet-client.crt
+#      becomes a 69-character name against Kubernetes' 63-char cap:
+#        invalid pod: spec.volumes[4].name: Invalid value:
+#          "system-secrets-kubernetes-kube-apiserver-apiserver-kubelet-client-crt"
+#      The apiserver never starts and the node goes NotReady with a circular
+#      "Authorization error ... nodes/proxy" that points nowhere near the cause.
+#
+# USE THIS INSTEAD: keep your kubeconfig and any :6443 VIP on the RKE2
+# apiservers for the whole coexistence window, and use talosctl for pods on
+# Talos control-plane nodes. Every workload node stays reachable.
+#
+# Shape only — no certificate or key material is committed here. To reproduce,
+# copy RKE2's own credential from an RKE2 control-plane node:
+#   /var/lib/rancher/rke2/server/tls/client-kube-apiserver.{crt,key}
+
+machine:
+  files:
+    - path: /var/lib/kc/tls.crt
+      permissions: 0o444        # apiserver runs as UID 65534
+      op: create
+      content: |
+        <RKE2 client-kube-apiserver.crt>
+    - path: /var/lib/kc/tls.key
+      permissions: 0o444
+      op: create
+      content: |
+        <RKE2 client-kube-apiserver.key>
+cluster:
+  apiServer:
+    extraArgs:                  # <-- REJECTED: "is not allowed"
+      kubelet-client-certificate: /kc/tls.crt
+      kubelet-client-key: /kc/tls.key
+    extraVolumes:
+      - hostPath: /var/lib/kc/tls.crt
+        mountPath: /kc/tls.crt  # short on purpose; see limit above
+        readonly: true
+      - hostPath: /var/lib/kc/tls.key
+        mountPath: /kc/tls.key
+        readonly: true

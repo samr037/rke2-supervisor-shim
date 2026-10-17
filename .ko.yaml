@@ -1,0 +1,23 @@
+# ko configuration for the published image (CI builds with ko, not docker).
+#
+# The base is pinned by digest, and is the same image the Dockerfile uses, so
+# both build paths produce a static binary on distroless nonroot (UID/GID
+# 65532). Without this file ko silently defaults to cgr.dev/chainguard/static,
+# a different base than the one docs/security.md describes. The tag before
+# the digest is informational; the digest is what is pulled. Dependabot cannot
+# see this file - bump the digest together with the Dockerfile's:
+#   docker buildx imagetools inspect gcr.io/distroless/static-debian12:nonroot
+defaultBaseImage: gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
+
+builds:
+  - id: shim
+    main: ./cmd/shim
+    env:
+      - CGO_ENABLED=0
+    # -trimpath: no build-machine paths in the binary, and reproducible across
+    # runners. -s -w matches the Dockerfile build.
+    flags:
+      - -trimpath
+    ldflags:
+      - -s
+      - -w

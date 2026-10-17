@@ -1,0 +1,29 @@
+/bin/
+/.go/
+adopt-work/
+# Agent worktrees, so they never show up as untracked in the main checkout.
+/.claude/worktrees/
+
+# conformance/testdata holds captured protocol contracts and must be
+# committable even where a broad pattern elsewhere would exclude it...
+!conformance/testdata/**
+
+# ...but private keys never are, anywhere - including testdata. These patterns
+# come AFTER the negation on purpose: in gitignore the last matching rule
+# wins, and the old order let `!conformance/testdata/**` re-include
+# *.key/*.pem captured from a throwaway server.
+*.key
+*.pem
+
+# Artefacts of the adoption and Talos workflows that contain key material:
+# Talos machine secrets, generated encryption config (the etcd encryption key),
+# rendered control-plane machine configs (embed the cluster CA key), and any
+# extracted PKI directory.
+secrets.yaml
+encryption-override.generated*
+rke2-encryption-config.json
+controlplane-*.yaml
+pki/
+# internal/pki is Go source, not key material.
+!/internal/pki/
+docs/video/.hyperframes/

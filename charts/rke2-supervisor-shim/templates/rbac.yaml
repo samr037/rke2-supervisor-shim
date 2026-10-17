@@ -1,0 +1,87 @@
+{{- if .Values.rbac.create }}
+# Node passwords are Secrets in kube-system, named <node>.node-password.rke2 -
+# the same place and format a real rke2 server uses. patch/list additionally
+# support recording and scanning certificate expiry annotations.
+#
+# RBAC cannot scope by name suffix, so this reads and writes ALL Secrets in
+# kube-system. Writes are narrowed by the ValidatingAdmissionPolicy in
+# admissionpolicy.yaml; reads cannot be narrowed by admission at all.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "shim.name" . }}-node-passwords
+  namespace: kube-system
+  labels: {{- include "shim.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "patch", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "shim.name" . }}-node-passwords
+  namespace: kube-system
+  labels: {{- include "shim.labels" . | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ include "shim.name" . }}-node-passwords}
+subjects:
+  - {kind: ServiceAccount, name: {{ include "shim.serviceAccountName" . }}, namespace: {{ include "shim.namespace" . }}}
+---
+# Nodes: discovering control-plane addresses for /v1-rke2/apiservers.
+# Events: CertificateExpirationWarning, as a real rke2 server emits.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "shim.name" . }}
+  labels: {{- include "shim.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "shim.name" . }}
+  labels: {{- include "shim.labels" . | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ include "shim.name" . }}}
+subjects:
+  - {kind: ServiceAccount, name: {{ include "shim.serviceAccountName" . }}, namespace: {{ include "shim.namespace" . }}}
+{{- if .Values.rbac.createRKE2ControllerBinding }}
+---
+# Only the subject below is fixed by the protocol: the shim issues
+# client-rke2-controller.crt with CN=system:rke2-controller and no O, so the
+# apiserver sees User "system:rke2-controller". The object names are ours.
+# A real RKE2 server reconciles its own ClusterRole/Binding named
+# "system:rke2-controller"; prefixing with the chart name keeps the two from
+# ever being the same object during an adoption, so neither side's
+# reconciliation (or a `helm uninstall`) can rewrite or delete the other's.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "shim.name" . }}-rke2-controller
+  labels: {{- include "shim.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["nodes/status"]
+    verbs: ["get", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "shim.name" . }}-rke2-controller
+  labels: {{- include "shim.labels" . | nindent 4 }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ include "shim.name" . }}-rke2-controller}
+subjects:
+  - {apiGroup: rbac.authorization.k8s.io, kind: User, name: "system:rke2-controller"}
+{{- end }}
+{{- end }}

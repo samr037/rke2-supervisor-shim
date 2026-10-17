@@ -1,0 +1,15 @@
+{{- if .Values.networkPolicy.enabled }}
+# NOTE: this does NOT protect the shim. NetworkPolicy does not apply to
+# hostNetwork pods, and the shim must be hostNetwork. It is a default-deny floor
+# for any OTHER pod added to this namespace. For real enforcement on :9345 and
+# :9346 see docs/network-security.md (Talos ingress firewall).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "shim.name" . }}-default-deny
+  namespace: {{ include "shim.namespace" . }}
+  labels: {{- include "shim.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+{{- end }}

@@ -1,0 +1,30 @@
+{{- if and .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "shim.name" . }}-metrics
+  namespace: {{ include "shim.namespace" . }}
+  labels: {{- include "shim.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector: {{- include "shim.selectorLabels" . | nindent 4 }}
+  ports:
+    - {name: metrics, port: {{ .Values.metrics.port }}, targetPort: {{ .Values.metrics.port }}, protocol: TCP}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "shim.name" . }}
+  namespace: {{ include "shim.namespace" . }}
+  labels:
+    {{- include "shim.labels" . | nindent 4 }}
+    {{- with .Values.metrics.serviceMonitor.labels }}{{- toYaml . | nindent 4 }}{{- end }}
+spec:
+  selector:
+    matchLabels: {{- include "shim.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames: [{{ include "shim.namespace" . }}]
+  endpoints:
+    - port: metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+{{- end }}

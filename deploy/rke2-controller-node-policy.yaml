@@ -1,0 +1,65 @@
+# Restricts what system:rke2-controller may change on Nodes.
+#
+# Requires Kubernetes >= 1.30 (admissionregistration.k8s.io/v1
+# ValidatingAdmissionPolicy). The chart renders the same policy automatically
+# when the cluster supports it (rke2ControllerAdmissionPolicy.enabled=auto).
+#
+# Every token holder can get a system:rke2-controller certificate (the endpoint
+# takes no node headers, exactly as on a real rke2 server), and the agent needs
+# patch on nodes to label its own Node. The identity is shared by every agent,
+# so RBAC cannot say "your own node": without this policy a stolen join token
+# could re-taint or cordon any node, or stamp a control-plane role label on a
+# node it controls and attract workloads that select for it. The policy keeps
+# what the agent needs (ordinary labels and annotations) and freezes the rest.
+#
+# nodes/status is not matched: what the agent writes there has not been
+# captured, and refusing it blind could break joins. That gap is documented.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: rke2-shim-rke2-controller-nodes
+spec:
+  # Fail closed: a refused node update shows up as a 403 in the agent log, which
+  # is loud, rather than as a silently re-tainted control plane.
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        # A PATCH reaches admission as UPDATE.
+        operations: ["UPDATE"]
+        resources: ["nodes"]
+  matchConditions:
+    - name: is-rke2-controller
+      expression: request.userInfo.username == "system:rke2-controller"
+  variables:
+    - name: newLabels
+      expression: object.metadata.?labels.orValue({})
+    - name: oldLabels
+      expression: oldObject.metadata.?labels.orValue({})
+  validations:
+    - expression: object.spec == oldObject.spec
+      message: >-
+        system:rke2-controller may change node labels and annotations only,
+        never the spec (taints, unschedulable, podCIDR, providerID)
+      reason: Forbidden
+    - expression: >-
+        variables.newLabels.all(k,
+          !(k.startsWith("node-role.kubernetes.io/") || k.startsWith("node-restriction.kubernetes.io/")) ||
+          (k in variables.oldLabels && variables.oldLabels[k] == variables.newLabels[k])) &&
+        variables.oldLabels.all(k,
+          !(k.startsWith("node-role.kubernetes.io/") || k.startsWith("node-restriction.kubernetes.io/")) ||
+          k in variables.newLabels)
+      message: >-
+        system:rke2-controller may not add, change or remove node-role.kubernetes.io/*
+        or node-restriction.kubernetes.io/* labels
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: rke2-shim-rke2-controller-nodes
+spec:
+  policyName: rke2-shim-rke2-controller-nodes
+  validationActions: [Deny]

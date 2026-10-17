@@ -1,0 +1,163 @@
+# Cilium host firewall for the control-plane node (OPTIONAL, defence in depth).
+#
+# Cilium is the one CNI that can police hostNetwork traffic: a
+# CiliumClusterwideNetworkPolicy with a nodeSelector (rather than an
+# endpointSelector) attaches to the host endpoint itself.
+#
+# REQUIRES BOTH:
+#   hostFirewall.enabled=true      - NOT the default
+#   policyCIDRMatchMode=nodes      - NOT the default
+#     helm upgrade cilium ... --set hostFirewall.enabled=true \
+#                             --set policyCIDRMatchMode=nodes
+#
+# Why the second one: by default Cilium's fromCIDR selectors never match
+# in-cluster nodes - traffic from another node carries the reserved
+# remote-node identity, not a CIDR identity. Every rule below that names node
+# addresses by CIDR (etcd peers, kubelets reaching the apiserver, rke2 agents
+# reaching 9345 once they are nodes) silently matches nothing without it, and
+# the host is locked out of its own cluster. The previous version of this file
+# hid that by allowing the remote-node and cluster entities on EVERY port,
+# which also opened 9345, 9346, etcd and the kubelet to every pod in the
+# cluster.
+#
+# Prefer deploy/talos-ingress-firewall.yaml as the primary control: it has no
+# prerequisites and keeps enforcing if Cilium is degraded or being upgraded.
+# Use this in addition, if you want the policy expressed as Kubernetes objects.
+#
+# WARNING: like the Talos firewall, an incomplete rule set locks you out. Stage
+# it with the host endpoint in policy audit mode
+# (`cilium-dbg endpoint config <host-ep-id> PolicyAuditMode=Enabled`), watch
+# `cilium-dbg monitor -t policy-verdict --related-to <host-ep-id>` for "audit"
+# verdicts, and keep a second path to the machine open.
+#
+# Addresses are the maquette's; substitute the same values as the Talos
+# firewall:  10.0.0.0/24 = $CLUSTER_SUBNET / $WORKER_SUBNET / $MGMT_SUBNET,
+#            10.0.0.16/32 = $MONITORING,  10.0.0.245/32 = $CP1 (add $CP2, $CP3).
+#
+# Ports deliberately ABSENT: anything bound to 127.0.0.1 or link-local only
+# (KubePrism 7445, scheduler 10259, controller-manager 10257, kubelet healthz
+# 10248) needs no rule; flannel VXLAN 4789 does not exist when Cilium is the CNI.
+---
+apiVersion: cilium.io/v2
+kind: CiliumClusterwideNetworkPolicy
+metadata:
+  name: control-plane-host-ingress
+spec:
+  description: >-
+    Restrict host-network ports on control-plane nodes, including the
+    rke2-supervisor-shim on 9345 and its metrics on 9346, which NetworkPolicy
+    cannot reach because the shim is a hostNetwork pod.
+  nodeSelector:
+    matchLabels:
+      node-role.kubernetes.io/control-plane: ""
+  ingress:
+    # --- Node and operator traffic, by address (needs policyCIDRMatchMode=nodes)
+
+    # Kubernetes API from the management network and from every node (kubelets,
+    # kube-proxy, rke2 agents once joined).
+    - fromCIDR:
+        - 10.0.0.0/24
+      toPorts:
+        - ports:
+            - {port: "6443", protocol: TCP}
+
+    # Talos apid (talosctl) and trustd (node certificate bootstrap).
+    - fromCIDR:
+        - 10.0.0.0/24
+      toPorts:
+        - ports:
+            - {port: "50000", protocol: TCP}
+            - {port: "50001", protocol: TCP}
+
+    # rke2 supervisor: only subnets whose machines may become nodes. Reaching
+    # it with the join token enrols a node.
+    - fromCIDR:
+        - 10.0.0.0/24
+      toPorts:
+        - ports:
+            - {port: "9345", protocol: TCP}
+
+    # shim metrics: scraper only (unauthenticated, leaks node names and
+    # certificate expiry).
+    - fromCIDR:
+        - 10.0.0.16/32
+      toPorts:
+        - ports:
+            - {port: "9346", protocol: TCP}
+
+    # kubelet and kube-proxy health from cluster nodes: apiservers on the
+    # other control planes reach this kubelet for exec/logs/port-forward.
+    - fromCIDR:
+        - 10.0.0.0/24
+      toPorts:
+        - ports:
+            - {port: "10250", protocol: TCP}
+            - {port: "10256", protocol: TCP}
+
+    # etcd: control-plane peers ONLY - one /32 per control-plane node. A pod
+    # that reaches etcd reads every Secret in the cluster.
+    - fromCIDR:
+        - 10.0.0.245/32
+      toPorts:
+        - ports:
+            - {port: "2379", protocol: TCP}
+            - {port: "2380", protocol: TCP}
+
+    # --- Cilium's own datapath, by identity
+
+    # cilium-health: other agents probe this node over TCP 4240 and ICMP echo.
+    # health = the per-node health endpoints, remote-node = the agents' hosts.
+    - fromEntities:
+        - health
+        - remote-node
+      toPorts:
+        - ports:
+            - {port: "4240", protocol: TCP}
+    - fromEntities:
+        - health
+        - remote-node
+      icmps:
+        - fields:
+            - {type: 8, family: IPv4}
+            - {type: 128, family: IPv6}
+
+    # Overlay: pod traffic between nodes arrives VXLAN-encapsulated on UDP 8472.
+    # Use 6081 for Geneve; drop this rule in native-routing mode; add UDP 51871
+    # if WireGuard encryption is enabled.
+    - fromEntities:
+        - remote-node
+      toPorts:
+        - ports:
+            - {port: "8472", protocol: UDP}
+
+    # --- Pods (the cluster entity), only what pods legitimately need
+
+    # The kubernetes Service: a pod's connection to the ClusterIP is DNATed to
+    # an apiserver endpoint, i.e. to this host's 6443.
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - {port: "6443", protocol: TCP}
+
+    # Talos host DNS. With machine.features.hostDNS.forwardKubeDNSToHost
+    # enabled, CoreDNS forwards to the node's resolver on 169.254.116.108:53,
+    # which is this host endpoint. Drop this rule if that feature is off.
+    - fromEntities:
+        - cluster
+      toPorts:
+        - ports:
+            - {port: "53", protocol: UDP}
+            - {port: "53", protocol: TCP}
+
+    # metrics-server scrapes every kubelet's /metrics/resource. Selected by
+    # label, not the cluster entity, so an arbitrary pod still cannot reach
+    # 10250. Adjust the labels to your metrics-server (and add Prometheus here
+    # if it scrapes kubelets directly).
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: metrics-server
+      toPorts:
+        - ports:
+            - {port: "10250", protocol: TCP}

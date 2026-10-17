@@ -1,0 +1,44 @@
+rke2-supervisor-shim is installed in namespace {{ include "shim.namespace" . }}, on every control-plane node.
+
+Verify it is serving:
+
+  kubectl -n {{ include "shim.namespace" . }} get ds {{ include "shim.name" . }} -o wide
+  kubectl -n {{ include "shim.namespace" . }} logs ds/{{ include "shim.name" . }} | grep advertising
+
+Point a worker at it with an ORDINARY rke2 agent config - nothing bespoke:
+
+  # /etc/rancher/rke2/config.yaml
+  server: https://<control-plane-ip>:{{ .Values.supervisorPort }}
+  token: <the token in secret {{ .Values.token.existingSecret }}>
+
+{{ if not .Values.cluster.apiServers -}}
+Control-plane addresses are discovered automatically, so adding a control-plane
+node needs no change here - the DaemonSet will start a shim on it.
+{{- else -}}
+WARNING: cluster.apiServers is pinned to {{ join "," .Values.cluster.apiServers }}.
+Every address listed MUST run a shim, or agents will fail to open their tunnel.
+Prefer leaving it empty so control-plane nodes are discovered.
+{{- end }}
+
+{{ if .Values.metrics.enabled -}}
+:{{ .Values.metrics.port }}/metrics is UNAUTHENTICATED on the host network.
+Restrict it at the host firewall - see docs/network-security.md.
+{{- else -}}
+Metrics are bound to 127.0.0.1:{{ .Values.metrics.port }} on each control-plane node
+(still reachable by other hostNetwork processes on that node).
+{{- end }}
+
+SECURITY: treat RBAC on the {{ include "shim.namespace" . }} namespace as CONTROL-PLANE-GRADE.
+The Secret {{ .Values.pki.existingSecret }} holds the cluster CA PRIVATE KEY. Anyone who can
+create pods (or exec, attach, port-forward, or read Secrets) in {{ include "shim.namespace" . }}
+can mount or read that key and sign any Kubernetes identity, cluster-admin
+included. The namespace is labelled PodSecurity "privileged", so admission will
+not stop such a pod either. Grant those verbs there only to people you would
+give cluster-admin.
+{{- if not (include "shim.secretsAdmissionPolicy.enabled" .) }}
+
+WARNING: the ValidatingAdmissionPolicy that limits the shim's Secret writes in
+kube-system to *.node-password.rke2 is NOT installed
+(secretsAdmissionPolicy.enabled={{ .Values.secretsAdmissionPolicy.enabled }}, Kubernetes {{ .Capabilities.KubeVersion.Version }}).
+The shim's ServiceAccount can create/patch any Secret in kube-system.
+{{- end }}

@@ -1,0 +1,26 @@
+# Pins only stay safe if something moves them. Every GitHub action is pinned to
+# a commit SHA and every Dockerfile base image to a digest; Dependabot opens a
+# PR when either has a newer release, keeping the "# vX.Y.Z" comments in step.
+#
+# Not covered, bump by hand alongside the Dockerfile:
+#   .ko.yaml defaultBaseImage digest, the ko version in ci.yml (setup-ko
+#   `version:`) and .gitlab-ci.yml, and ci-github/github-actions-ci.yml, which
+#   must stay byte-identical to .github/workflows/ci.yml.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly}
+    groups:
+      actions: {patterns: ["*"]}
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule: {interval: weekly}
+    groups:
+      # k8s.io modules must move together or the build breaks.
+      kubernetes: {patterns: ["k8s.io/*", "sigs.k8s.io/*"]}
+
+  - package-ecosystem: docker
+    directory: /
+    schedule: {interval: weekly}

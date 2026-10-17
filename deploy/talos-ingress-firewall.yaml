@@ -1,0 +1,133 @@
+# Talos ingress firewall for a control-plane node running rke2-supervisor-shim.
+#
+# WHY THIS AND NOT A NetworkPolicy
+# --------------------------------
+# The shim runs with hostNetwork, and Kubernetes NetworkPolicy does not apply to
+# hostNetwork pods - their traffic reaches the node's stack directly, never the
+# pod network. A pod-selector policy for :9345 would look like protection and
+# provide none. Talos' own ingress firewall (nftables, driven by machine config)
+# is the control that actually works here, and it needs no CNI support.
+#
+# Apply as a machine config patch to CONTROL-PLANE nodes:
+#
+#   talosctl patch mc -n <cp-ip> --patch @deploy/talos-ingress-firewall.yaml
+#
+# WARNING: getting this wrong locks out talosctl AND kubectl at the same time,
+# and --mode=try does NOT reliably roll it back - tested, the documents stayed
+# applied well past the timeout (see docs/network-security.md). Keep an
+# independent path to the machine (hypervisor console, or an unpatched second
+# control-plane node) before applying, and roll forward one node at a time.
+#
+# Substitute before applying:
+#   $CLUSTER_SUBNET  every node in the cluster        e.g. 10.0.0.0/24
+#   $WORKER_SUBNET   nodes allowed to join via rke2   e.g. 10.0.0.0/24
+#   $MGMT_SUBNET     where talosctl/kubectl come from e.g. 10.0.0.0/24
+#   $MONITORING      Prometheus scraper               e.g. 10.0.0.60/32
+#   $CP1,$CP2,$CP3   control-plane node addresses
+---
+apiVersion: v1alpha1
+kind: NetworkDefaultActionConfig
+ingress: block
+---
+# talosctl. Lose this rule and you lose management of the node.
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: apid-ingress
+portSelector:
+  ports:
+    - 50000
+  protocol: tcp
+ingress:
+  - subnet: $MGMT_SUBNET
+---
+# trustd: certificate distribution between Talos nodes.
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: trustd-ingress
+portSelector:
+  ports:
+    - 50001
+  protocol: tcp
+ingress:
+  - subnet: $CLUSTER_SUBNET
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: kubernetes-api-ingress
+portSelector:
+  ports:
+    - 6443
+  protocol: tcp
+ingress:
+  - subnet: $MGMT_SUBNET
+  - subnet: $CLUSTER_SUBNET
+---
+# etcd: control-plane peers only, never the wider cluster.
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: etcd-ingress
+portSelector:
+  ports:
+    - 2379-2380
+  protocol: tcp
+ingress:
+  - subnet: $CP1/32
+  # - subnet: $CP2/32
+  # - subnet: $CP3/32
+---
+# kubelet: reached by the apiserver for logs/exec.
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: kubelet-ingress
+portSelector:
+  ports:
+    - 10250
+  protocol: tcp
+ingress:
+  - subnet: $CLUSTER_SUBNET
+---
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: kube-proxy-health-ingress
+portSelector:
+  ports:
+    - 10256
+  protocol: tcp
+ingress:
+  - subnet: $CLUSTER_SUBNET
+---
+# THE SHIM. Only nodes permitted to join the cluster should reach the
+# supervisor: holding the token, anything that can reach 9345 can enrol a node.
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: rke2-supervisor-ingress
+portSelector:
+  ports:
+    - 9345
+  protocol: tcp
+ingress:
+  - subnet: $WORKER_SUBNET
+---
+# Shim metrics: unauthenticated, and they expose node names and certificate
+# expiry timestamps. Restrict to the scraper.
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: rke2-supervisor-metrics-ingress
+portSelector:
+  ports:
+    - 9346
+  protocol: tcp
+ingress:
+  - subnet: $MONITORING
+---
+# Flannel VXLAN. Talos uses 4789; Cilium VXLAN uses 8472 - check with
+# `talosctl netstat --listening --udp` before assuming.
+apiVersion: v1alpha1
+kind: NetworkRuleConfig
+name: cni-vxlan
+portSelector:
+  ports:
+    - 4789
+  protocol: udp
+ingress:
+  - subnet: $CLUSTER_SUBNET

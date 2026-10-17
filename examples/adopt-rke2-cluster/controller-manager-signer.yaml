@@ -1,0 +1,21 @@
+# kube-controller-manager's CSR signer refuses a multi-cert CA file
+# ("expected 1 certificate, found 2"). Adopting RKE2 requires cluster.ca to be a
+# BUNDLE so both CAs are trusted, and Talos passes that same file to the signer.
+# Trust wants two certs, signing wants one. Shadow the signer's copy.
+# extraArgs cannot do it (Talos denies cluster-signing-cert-file); the mount
+# path here yields a 56-char volume name, under the 63-char limit.
+machine:
+  files:
+    - path: /var/lib/sca/ca.crt
+      permissions: 0o444
+      op: create
+      content: |
+        <the FIRST certificate of your cluster.ca bundle - the signing CA,
+         i.e. rke2-server-ca. Extract with:
+           awk \'/BEGIN CERT/{n++} n==1{print} /END CERT/{if(n==1) exit}\' ca.crt>
+cluster:
+  controllerManager:
+    extraVolumes:
+      - hostPath: /var/lib/sca/ca.crt
+        mountPath: /system/secrets/kubernetes/kube-controller-manager/ca.crt
+        readonly: true
