@@ -166,6 +166,11 @@ is unavoidable and how it is contained.
 
 ## Component map
 
+![Architecture of the join path](media/architecture.png)
+
+[Interactive version](media/architecture.html), with every box linked to its
+source lines. Generated with [Archify](https://github.com/tt-a1i/archify).
+
 ```mermaid
 flowchart LR
     subgraph proc["rke2-supervisor-shim process"]

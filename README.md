@@ -55,6 +55,14 @@ The shim runs as a DaemonSet on every Talos control-plane node, with
 dials `<apiserver-ip>:9345` for its tunnel, taking the addresses from
 `/v1-rke2/apiservers`, so a supervisor must listen beside every apiserver.
 
+The join path in detail, from the token check to the signed certificate:
+
+![Architecture of the join path: token check, CSR checks, node-name reservation, signing by the Talos CA, tunnel and control-plane discovery](docs/media/architecture.png)
+
+The [interactive version](docs/media/architecture.html) (download and open it
+in a browser) links every box to the source lines it summarises, at snapshot
+`ae4524d`.
+
 | Endpoint | Notes |
 |---|---|
 | `GET /cacerts` | unauthenticated by design; the agent pins this CA |
