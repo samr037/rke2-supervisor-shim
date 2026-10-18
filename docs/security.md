@@ -490,7 +490,7 @@ gh attestation verify oci://ghcr.io/samr037/rke2-supervisor-shim:$TAG \
 ```
 
 Then deploy by **digest**, not tag (the chart's `image.digest`), so what runs is
-exactly what you verified. The `0.1.0` image exists once `v0.1.0` is tagged.
+exactly what you verified.
 
 ## Notes for a public mirror
 

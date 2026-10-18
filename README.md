@@ -137,8 +137,7 @@ helm install shim charts/rke2-supervisor-shim --namespace rke2-shim \
   --set-file agentConfig.contents=conformance/testdata/v1.35.7+rke2r1/config.json
 ```
 
-> The `v0.1.0` tag and its `0.1.0` image are published when `v0.1.0` is tagged.
-> Until then, use `main` and pin the image to a commit SHA
+> To track `main` instead of a release, pin the image to a commit SHA
 > (`--set image.tag=<full-sha>`). There is no `latest` tag, by design.
 
 Verify the image before it touches your CA key, then pin it by digest
