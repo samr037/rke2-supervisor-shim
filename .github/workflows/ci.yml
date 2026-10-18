@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: {persist-credentials: false}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with: {go-version: '1.26'}
+        with: {go-version: '1.27'}
       - run: go vet ./...
       # Replays protocol contracts captured from real rke2 servers.
       # No cluster or VM required. See docs/compatibility.md.
@@ -48,7 +48,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: {persist-credentials: false}
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with: {go-version: '1.26'}
+        with: {go-version: '1.27'}
       # KO_DOCKER_REPO must NOT be set at job level: setup-ko only logs in to
       # ghcr.io when it is unset. The ko version is explicit so a new ko
       # release cannot change the build without a reviewed commit.

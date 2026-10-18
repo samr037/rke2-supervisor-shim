@@ -9,7 +9,7 @@ variables:
 # ---------------------------------------------------------------------------
 test:
   stage: test
-  image: golang:1.26
+  image: golang:1.27
   script:
     - go vet ./...
     - go test -race -v ./...
@@ -32,7 +32,7 @@ test:
 # binary on distroless nonroot) without needing a Docker daemon.
 build:
   stage: build
-  image: golang:1.26
+  image: golang:1.27
   variables:
     KO_DOCKER_REPO: $CI_REGISTRY_IMAGE
     GOFLAGS: -trimpath
