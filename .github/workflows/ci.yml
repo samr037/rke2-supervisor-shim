@@ -21,7 +21,7 @@ jobs:
       # Dependabot (.github/dependabot.yml) keeps the pins current.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: {persist-credentials: false}
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with: {go-version: '1.27'}
       - run: go vet ./...
       # Replays protocol contracts captured from real rke2 servers.
@@ -47,14 +47,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with: {persist-credentials: false}
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with: {go-version: '1.27'}
       # KO_DOCKER_REPO must NOT be set at job level: setup-ko only logs in to
       # ghcr.io when it is unset. The ko version is explicit so a new ko
       # release cannot change the build without a reviewed commit.
       - uses: ko-build/setup-ko@61b4d1d396f5b2e7d6bb6fefdce3dc38d1a13445 # v0.10
         with: {version: v0.19.1}
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with: {cosign-release: v3.0.6}
 
       - name: Choose the image tag
